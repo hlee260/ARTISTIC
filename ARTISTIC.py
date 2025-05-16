@@ -7,49 +7,77 @@ from draw_rna.ipynb_draw import draw_struct
 
 # === Helpers ===
 def sanitize_sequence(raw: str) -> str:
-    """Keep only valid bases A, T, C, G, U (uppercase)."""
     return ''.join(re.findall(r"[ATCGU]", raw.upper()))
 
 def highest_salt(buf: str):
     """
     From a buffer‐description string, return (salt_name, concentration_mM).
-    Special‐case PBS to 150 mM NaCl.
+    Special‐case PBS is converted to to 150 mM NaCl.
+    Recognizes NaCl, KCl, MgCl2, and CaCl2 in any order.
     """
-    txt = buf.strip()
-    # 1) Special case PBS
-    if "PBS" in txt.upper() or "PHOSPHATE BUFFERED SALINE" in txt.upper():
-        return "NACL", 150
+    # 0) normalize unicode subscript
+    txt = buf.strip().replace("₂", "2")
 
-    # 2) Case‐insensitive match for NaCl, KCl, MgCl2 with concentration in mM
-    matches = re.findall(
-        r"(NaCl|KCl|MgCl2)\s*,?\s*(\d+\.?\d*)\s*mM",
-        txt,
-        flags=re.IGNORECASE
-    )
+    # 1) PBS / Phosphate fallback
+    if re.search(r"\bPBS\b", txt, re.IGNORECASE) \
+    or re.search(r"SALINE", txt, re.IGNORECASE):
+        return "NACL", 150.0
+
+    # 2) regex to catch both “Salt … mM” and “… mM Salt”
+    pattern = re.compile(r"""
+      (?:                                    # either:
+        (NaCl|KCl|MgCl2|CaCl2)               #   group1=Salt
+        [\s,;]*?                             #   optional sep
+        (\d+\.?\d*)\s*mM                     #   group2=conc
+      )
+      |
+      (?:                                    # or:
+        (\d+\.?\d*)\s*mM                     #   group3=conc
+        [\s,;]*?                             #   optional sep
+        (NaCl|KCl|MgCl2|CaCl2)               #   group4=Salt
+      )
+    """, re.IGNORECASE | re.VERBOSE)
+
+    matches = pattern.findall(txt)
     if not matches:
         return None, None
 
-    # 3) Pick the highest concentration
-    salt, conc = max(matches, key=lambda x: float(x[1]))
-    return salt.upper(), float(conc)
-
+    # 3) build candidate list
+    candidates = []
+    for g1, g2, g3, g4 in matches:
+        if g1:        # salt first
+            salt = g1.upper().replace(" ", "")
+            conc = float(g2)
+        else:         # conc first
+            salt = g4.upper().replace(" ", "")
+            conc = float(g3)
+            candidates.append((salt, conc))
+    # 4) choose highest concentration
+    best = max(candidates, key=lambda x: x[1])
+    return best
 
 # === Aptamer Database Loader ===
 class AptamerDatabase:
     def __init__(self, excel_path: str):
         df = pd.read_excel(excel_path, sheet_name=0)
         df.columns = [
-            c.strip().lower()
-             .replace(" ", "_")
-             .replace("(", "")
-             .replace(")", "")
+            c.strip().lower().replace(" ", "_")
+             .replace("(", "").replace(")", "")
              .replace("/", "_")
             for c in df.columns
         ]
+        df['target_norm'] = (
+            df['target']
+              .astype(str)
+              .str.lower()
+              .str.replace(r'[^a-z0-9]', '', regex=True)
+        )
         self.df = df
 
     def search_by_target(self, target: str) -> pd.DataFrame:
-        return self.df[self.df['target'].str.contains(target, case=False, na=False)]
+        # normalize the user’s query the same way
+        q = re.sub(r'[^a-z0-9]', '', target.lower())
+        return self.df[self.df['target_norm'].str.contains(q)]
 
 
 # === dART Generator Settings ===
@@ -58,13 +86,13 @@ Prom_t  = "TATAGTGAGTCGTATTAGAA"
 O1_nt = "CTACATCCACATACTAATTAAC"
 O1_t  = "GTTAATTAGTATGTGGATGTAG"
 
-# Alternative outputs if O1 output is not compatible
+# Alternative outputs
 O2_nt = "CTACTTTCACTTCACAACATCA"
 O2_t  = "TGATGTTGTGAAGTGAAAGTAG"
 O3_nt = "TACCATCACATTCAATAATCCT"
 O3_t  = "AGGATTATTGAATGTGATGGTA"
 
-# Designing Inverter dART for the digital biosensor
+# Designing Inverter dART for the digital biosensor (O1 output)
 O1c_nt = "GTTAATTAGTATGTGGAT"
 O1c_t  = "ATCCACATACTAATTAAC"
 
@@ -72,6 +100,9 @@ default_insulation        = "GGGATG"
 default_ins_comp          = "CATCCC"
 alternative_insulations   = ["GGGAGT","GGGAGA","GGGAAA"]
 alternative_ins_comps      = ["ACTCCC","TCTCCC","TTTCCC"]
+
+# Other insulation domains considered if the candidates above do not work!
+
 alternative_alt_insulations = [
     "GGGAAC","GGGAAG","GGGAAT","GGGACA","GGGACG","GGGACT","GGGAGC","GGGAGG",
     "GGGATA","GGGATC","GGGATT","GGGCAA","GGGCAC","GGGCAG","GGGCAT","GGGCCA",
