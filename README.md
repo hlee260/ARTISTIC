@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 
 from draw_rna.ipynb_draw import draw_struct
 
+# Running the code
+
 ARTISTIC contains the functions for generating dART sequences and extracting buffer conditions for titration experiment.
 
 Main Script is used to input the target ligand. ARTISTIC find aptamers from UTexas_Datasheet, extract the aptamer name, sequence, buffer conditions, and reported Kd.
