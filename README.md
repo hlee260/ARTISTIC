@@ -1,5 +1,5 @@
 # ARTISTIC
-ARTISTIC was run with python 3.12.7, but probaboly works with newer versions. Most processes are using the following packages:
+ARTISTIC was run with python 3.12.7. All processes are using the following packages (please download one-by-one if necessary):
 
 import re
 
